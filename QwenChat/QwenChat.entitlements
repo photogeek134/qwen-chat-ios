@@ -9,10 +9,10 @@
 
     <!-- Extended virtual addressing lets the OS map very large model files
          into the process address space. Particularly helpful on iPad Pro
-         when loading the 9B model (~5.6 GB safetensors file). -->
+         when loading the 9B model (~5.6 GB safetensors file). 
     <key>com.apple.developer.kernel.extended-virtual-addressing</key>
     <true/>
-
+	-->
     <!-- Required to download model weights from Hugging Face on first launch. -->
     <key>com.apple.security.network.client</key>
     <true/>
