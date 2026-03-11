@@ -114,7 +114,7 @@ func releaseModel() {
 
 // MARK: - Message Sending
 
-func sendMessage(text: String, image: UIImage? = nil) {
+func sendMessage(text: String, image: UIImage? = nil, attachedFileName: String? = nil) {
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty || image != nil else { return }
     guard !isGenerating else { return }
@@ -122,8 +122,14 @@ func sendMessage(text: String, image: UIImage? = nil) {
     isTruncated = false
 
     let imageData = image?.jpegData(compressionQuality: 0.5)
-    print("[DEBUG] sendMessage: text='\(trimmed)', hasImage=\(image != nil)")
-    let userMessage = ChatMessage(role: .user, content: trimmed, imageData: imageData)
+    print("[DEBUG] sendMessage: text length=\(trimmed.count), hasImage=\(image != nil), file=\(attachedFileName ?? "none")")
+
+    let userMessage = ChatMessage(
+        role: .user,
+        content: trimmed,
+        imageData: imageData,
+        attachedFileName: attachedFileName
+    )
     messages.append(userMessage)
 
     generationTask = Task {

@@ -1,75 +1,55 @@
 import Foundation
 import UIKit
 
+// MARK: - Role
+
+enum MessageRole {
+    case system, user, assistant
+}
+
+// MARK: - ChatMessage
+
 struct ChatMessage: Identifiable {
     let id: UUID
-    let role: Role
+    var role: MessageRole
     var content: String
-    let imageData: Data?
-    let timestamp: Date
+    var imageData: Data?
 
-    /// True for the silent "Continue." turns that are injected between
-    /// multi-pass responses. The UI can hide these from the chat transcript
-    /// so the conversation looks seamless to the user.
+    // MARK: File attachment fields
+    // The display name shown in the bubble (e.g. "Report.pdf")
+    var attachedFileName: String?
+    // The extracted plain text sent to the model as part of the prompt.
+    // For PDFs this is the text layer; for plain text files it's the raw content.
+    // This is NOT stored as the message content directly — it gets prepended
+    // to the user's typed prompt in ChatViewModel.sendMessage().
+    var attachedFileText: String?
+
+    // MARK: Continuation flag
+    // True for the silent "Continue." turns injected between multi-pass responses.
+    // The UI filters these out of the visible transcript.
     var isContinuationPrompt: Bool
+
+    // Convenience: materialise UIImage from stored JPEG data
+    var image: UIImage? {
+        guard let data = imageData else { return nil }
+        return UIImage(data: data)
+    }
 
     init(
         id: UUID = UUID(),
-        role: Role,
+        role: MessageRole,
         content: String,
         imageData: Data? = nil,
-        timestamp: Date = Date(),
+        attachedFileName: String? = nil,
+        attachedFileText: String? = nil,
         isContinuationPrompt: Bool = false
     ) {
         self.id = id
         self.role = role
         self.content = content
         self.imageData = imageData
-        self.timestamp = timestamp
+        self.attachedFileName = attachedFileName
+        self.attachedFileText = attachedFileText
         self.isContinuationPrompt = isContinuationPrompt
-    }
-
-    enum Role {
-        case user
-        case assistant
-        case system
-    }
-
-    var isUser: Bool { role == .user }
-
-    var image: UIImage? {
-        guard let imageData else { return nil }
-        return UIImage(data: imageData)
-    }
-
-    /// Whether the model is currently in a thinking block (opened but not closed).
-    var isThinking: Bool {
-        content.contains("<think>") && !content.contains("</think>")
-    }
-
-    /// Parsed content split into thinking and visible portions.
-    var parsedContent: (thinking: String?, visible: String) {
-        let text = content
-
-        guard let startRange = text.range(of: "<think>") else {
-            return (nil, text)
-        }
-
-        if let endRange = text.range(of: "</think>") {
-            // Complete thinking block
-            let thinking = String(text[startRange.upperBound..<endRange.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let visible = (
-                String(text[text.startIndex..<startRange.lowerBound]) +
-                String(text[endRange.upperBound...])
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
-            return (thinking.isEmpty ? nil : thinking, visible)
-        } else {
-            // Still streaming thinking — no closing tag yet.
-            // Return empty string (not nil) so the UI shows the thinking indicator.
-            let thinking = String(text[startRange.upperBound...])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return (thinking, "")
-        }
     }
 }
