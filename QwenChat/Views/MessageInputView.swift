@@ -33,7 +33,7 @@ var body: some View {
                 .foregroundStyle(attachedImage == nil ? Color.secondary : Color.blue)
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
-            Task {
+            Task { @MainActor in
                 if let newItem,
                    let data = try? await newItem.loadTransferable(type: Data.self),
                    let image = UIImage(data: data) {
