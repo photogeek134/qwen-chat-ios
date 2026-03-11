@@ -78,7 +78,7 @@ var minimumDeviceRAMGB: Double {
     case .qwen35_0_8B: return 4.0   // fine on any modern iPhone (6 GB+)
     case .qwen35_2B:   return 6.0   // iPhone 14+ / any iPad
     case .qwen35_4B:   return 8.0   // iPhone 15 Pro+ / iPad with ≥8 GB
-    case .qwen35_9B:   return 12.0  // iPad Pro M4/M5 (12-16 GB)
+    case .qwen35_9B:   return 10.0  // iPad Pro M4/M5 (12-16 GB)
     }
 }
 
