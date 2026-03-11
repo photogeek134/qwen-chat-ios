@@ -2,16 +2,15 @@ import SwiftUI
 
 struct ContentView: View {
 @State private var viewModel = ChatViewModel()
-@Environment(.horizontalSizeClass) private var horizontalSizeClass
+@Environment(\.horizontalSizeClass) private var horizontalSizeClass: UserInterfaceSizeClass?
 
-```
 var body: some View {
     NavigationStack {
         VStack(spacing: 0) {
             modelStatusBar
             Divider()
 
-            // ── Chat messages ─────────────────────────────────────────
+            // MARK: - Chat messages
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 8) {
@@ -31,12 +30,9 @@ var body: some View {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
-                .onChange(of: viewModel.streamingText) { _, _ in
-                    proxy.scrollTo("bottom", anchor: .bottom)
-                }
             }
 
-            // ── Truncation banner (shown between scroll area and input) ──
+            // MARK: - Truncation banner (shown between scroll area and input)
             if viewModel.isTruncated {
                 ContinueBanner(
                     tokenBudget: ChatViewModel.maxTokensPerPass,
@@ -53,7 +49,7 @@ var body: some View {
 
             Divider()
 
-            // ── Input area ────────────────────────────────────────────
+            // MARK: - Input area
             VStack(spacing: 0) {
                 MessageInputView(viewModel: viewModel)
                     .padding(.horizontal, horizontalPadding)
@@ -70,7 +66,7 @@ var body: some View {
         .toolbar { toolbarContent }
     }
     .task {
-        await viewModel.loadModelIfNeeded()
+        await viewModel.loadModel()
     }
 }
 
@@ -79,15 +75,14 @@ var body: some View {
 private var modelStatusBar: some View {
     HStack(spacing: 12) {
         Group {
-            switch viewModel.modelState {
-            case .idle:
-                Image(systemName: "cpu").foregroundStyle(.secondary)
-            case .loading:
+            if viewModel.isLoading {
                 ProgressView().controlSize(.small)
-            case .ready:
+            } else if viewModel.modelContainer != nil {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-            case .error:
+            } else if viewModel.errorMessage != nil {
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            } else {
+                Image(systemName: "cpu").foregroundStyle(.secondary)
             }
         }
 
@@ -95,10 +90,10 @@ private var modelStatusBar: some View {
             Text(viewModel.selectedModel.displayName)
                 .font(.subheadline.weight(.medium))
             Group {
-                if viewModel.modelState == .loading {
-                    Text(viewModel.loadingProgress)
-                } else if viewModel.modelState == .ready, let tps = viewModel.tokensPerSecond {
-                    Text(String(format: "%.1f tok/s", tps))
+                if viewModel.isLoading {
+                    Text(viewModel.loadingStatus)
+                } else if let error = viewModel.errorMessage {
+                    Text(error)
                 } else {
                     Text(viewModel.selectedModel.approximateSizeDescription)
                 }
@@ -179,7 +174,7 @@ private var toolbarContent: some ToolbarContent {
 
     ToolbarItem(placement: .navigationBarTrailing) {
         Button {
-            viewModel.clearConversation()
+            viewModel.messages.removeAll()
         } label: {
             Image(systemName: "trash")
         }
@@ -195,7 +190,7 @@ private var horizontalPadding: CGFloat {
     }
     return 16
 }
-```
+
 
 }
 

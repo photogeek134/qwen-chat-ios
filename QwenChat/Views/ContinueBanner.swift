@@ -8,7 +8,7 @@ let tokenBudget: Int
 let onContinue: () -> Void
 let onDismiss: () -> Void
 
-```
+
 var body: some View {
     HStack(spacing: 10) {
         Image(systemName: "text.append")
@@ -47,7 +47,7 @@ var body: some View {
     }
     .transition(.move(edge: .bottom).combined(with: .opacity))
 }
-```
+
 
 }
 

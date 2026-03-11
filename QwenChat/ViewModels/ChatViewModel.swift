@@ -8,17 +8,18 @@ import SwiftUI
 @MainActor
 final class ChatViewModel {
 var messages: [ChatMessage] = []
-var selectedModel: AppModel = .qwen3_5_0_8B
+var selectedModel: QwenModel = .qwen35_0_8B
 var isLoading = false
 var isGenerating = false
 var loadProgress: Double = 0
-var loadingStatus: String = “”
+var loadingStatus: String = ""
 var errorMessage: String?
 
-```
+
 // Set to true when the last generation was cut off by maxTokens
 // (not by EOS). The UI can observe this to show a "Continue" button.
 var isTruncated = false
+
 
 private(set) var modelContainer: ModelContainer?
 private var generationTask: Task<Void, Never>?
@@ -82,7 +83,7 @@ func loadModel() async {
     isLoading = false
 }
 
-func switchModel(to newModel: AppModel) async {
+func switchModel(to newModel: QwenModel) async {
     guard newModel != selectedModel else { return }
 
     stopGeneration()
@@ -194,7 +195,7 @@ private func generate() async {
     messages.append(assistantMessage)
     let assistantIndex = messages.count - 1
 
-    var lastInfo: GenerateInfo?
+    var lastInfo: GenerateCompletionInfo?
     var hitTokenLimit = false
 
     do {
@@ -225,7 +226,8 @@ private func generate() async {
                 // rather than the model naturally finishing (EOS token).
                 // GenerateInfo.stopReason is a String in mlx-swift-lm;
                 // the value is "max_tokens" when the budget is exhausted.
-                hitTokenLimit = (info.stopReason == "max_tokens")
+                hitTokenLimit = (info.stopReason == .length)
+
 
             default:
                 break
@@ -234,7 +236,7 @@ private func generate() async {
 
         // Append performance stats once generation is done
         if let info = lastInfo {
-            let stats = String(format: "%.1f tok/s · %d tokens", info.tokensPerSecond, info.promptTokens + info.generationTokens)
+            let stats = String(format: "%.1f tok/s", info.tokensPerSecond)
             messages[assistantIndex].content += "\n\n_(\(stats))_"
         }
 
@@ -249,6 +251,14 @@ private func generate() async {
 
     isGenerating = false
 }
-```
 
+}
+
+private extension QwenModel {
+    func mlxModelConfiguration() -> ModelConfiguration {
+        ModelConfiguration(
+            id: huggingFaceID,
+            overrideTokenizer: "PreTrainedTokenizer"
+        )
+    }
 }

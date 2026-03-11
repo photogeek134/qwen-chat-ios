@@ -1,6 +1,4 @@
 import Foundation
-import MLXLLM
-import MLXLMCommon
 
 // MARK: - Device Memory Helper
 
@@ -10,7 +8,7 @@ enum DeviceMemory {
 /// Total physical RAM in bytes.
 static let totalBytes: UInt64 = ProcessInfo.processInfo.physicalMemory
 
-```
+
 /// Total physical RAM in gigabytes (floating point for comparisons).
 static let totalGB: Double = Double(totalBytes) / 1_073_741_824.0
 
@@ -21,7 +19,7 @@ static let bucketGB: Double = {
     let rounded = (mb / 256.0).rounded() * 256.0       // snap to 256 MB
     return rounded / 1024.0                             // MB → GB
 }()
-```
+
 
 }
 
@@ -32,7 +30,7 @@ static let bucketGB: Double = {
 /// device has enough RAM to run it safely.
 enum QwenModel: String, CaseIterable, Identifiable {
 
-```
+
 case qwen35_0_8B = "qwen35_0_8b"
 case qwen35_2B   = "qwen35_2b"
 case qwen35_4B   = "qwen35_4b"
@@ -40,7 +38,7 @@ case qwen35_9B   = "qwen35_9b"
 
 var id: String { rawValue }
 
-// ── Display ───────────────────────────────────────────────────────────
+// MARK: - Display
 
 var displayName: String {
     switch self {
@@ -60,7 +58,7 @@ var approximateSizeDescription: String {
     }
 }
 
-// ── Memory requirements ───────────────────────────────────────────────
+// MARK: - Memory requirements
 
 /// Model weights on disk / in unified memory at 4-bit quantisation.
 var modelWeightGB: Double {
@@ -99,7 +97,7 @@ var unsupportedReason: String {
 
 var supportsVision: Bool { true }
 
-// ── HuggingFace model IDs ─────────────────────────────────────────────
+// MARK: - HuggingFace model IDs
 
 var huggingFaceID: String {
     switch self {
@@ -110,15 +108,7 @@ var huggingFaceID: String {
     }
 }
 
-/// Factory that returns the ModelConfiguration used by mlx-swift-lm.
-func mlxModelConfiguration() -> ModelConfiguration {
-    ModelConfiguration(
-        id: huggingFaceID,
-        overrideTokenizer: "PreTrainedTokenizer"
-    )
-}
-
-// ── Convenience ───────────────────────────────────────────────────────
+// MARK: - Convenience
 
 /// All models that can run on this device, in ascending parameter order.
 static var supportedModels: [QwenModel] {
@@ -130,6 +120,6 @@ static var supportedModels: [QwenModel] {
 static var defaultModel: QwenModel {
     supportedModels.last ?? .qwen35_0_8B
 }
-```
+
 
 }

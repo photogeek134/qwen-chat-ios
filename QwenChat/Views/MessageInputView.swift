@@ -4,9 +4,8 @@ import PhotosUI
 // MARK: - MessageInputView
 
 struct MessageInputView: View {
-@Bindable var viewModel: ChatViewModel
+var viewModel: ChatViewModel
 
-```
 // Text field state
 @State private var inputText: String = ""
 @State private var selectedPhotoItem: PhotosPickerItem? = nil
@@ -20,18 +19,18 @@ struct MessageInputView: View {
 // Whether the send action is currently available
 private var canSend: Bool {
     let hasText = !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-    let isReady = viewModel.modelState == .ready && !viewModel.isGenerating
+    let isReady = !viewModel.isLoading && viewModel.modelContainer != nil && !viewModel.isGenerating
     return (hasText || attachedImage != nil) && isReady
 }
 
 var body: some View {
     HStack(alignment: .bottom, spacing: 10) {
 
-        // ── Photo picker button ──────────────────────────────────────
+        // MARK: - Photo picker button
         PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
             Image(systemName: attachedImage == nil ? "photo" : "photo.fill")
                 .font(.system(size: 22))
-                .foregroundStyle(attachedImage == nil ? .secondary : .blue)
+                .foregroundStyle(attachedImage == nil ? Color.secondary : Color.blue)
         }
         .onChange(of: selectedPhotoItem) { _, newItem in
             Task {
@@ -44,9 +43,9 @@ var body: some View {
                 }
             }
         }
-        .disabled(viewModel.modelState != .ready)
+        .disabled(viewModel.isLoading || viewModel.modelContainer == nil)
 
-        // ── Text input + image thumbnail stack ───────────────────────
+        // MARK: - Text input + image thumbnail stack
         VStack(alignment: .leading, spacing: 6) {
 
             // Attached image thumbnail (shown above the text field)
@@ -151,7 +150,7 @@ var body: some View {
             )
         }
 
-        // ── Send / Stop button ───────────────────────────────────────
+        // MARK: - Send / Stop button
         Button {
             if viewModel.isGenerating {
                 viewModel.stopGeneration()
@@ -188,7 +187,6 @@ private func submitIfPossible() {
         await viewModel.sendMessage(text: text, image: image)
     }
 }
-```
 
 }
 
@@ -197,9 +195,8 @@ private func submitIfPossible() {
 /// A small overlay shown below the input area on iPad when a hardware
 /// keyboard is attached, reminding users of the Enter / Shift+Enter shortcuts.
 struct KeyboardShortcutHint: View {
-@Environment(.horizontalSizeClass) private var horizontalSizeClass
+@Environment(\.horizontalSizeClass) private var horizontalSizeClass: UserInterfaceSizeClass?
 
-```
 var body: some View {
     // Only show on iPad (regular width) and only when a hardware keyboard
     // is likely connected (GCKeyboard is a reliable signal on iOS 14+).
@@ -214,6 +211,5 @@ var body: some View {
         .padding(.bottom, 2)
     }
 }
-```
 
 }
