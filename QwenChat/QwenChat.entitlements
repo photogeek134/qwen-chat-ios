@@ -2,9 +2,19 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>com.apple.developer.kernel.increased-memory-limit</key>
-	<true/>
-	<key>com.apple.security.network.client</key>
-	<true/>
+    <!-- Allows the process to request more than the default per-app RAM limit.
+         Required on both iPhone and iPad for loading large LLM weight files. -->
+    <key>com.apple.developer.kernel.increased-memory-limit</key>
+    <true/>
+
+    <!-- Extended virtual addressing lets the OS map very large model files
+         into the process address space. Particularly helpful on iPad Pro
+         when loading the 9B model (~5.6 GB safetensors file). -->
+    <key>com.apple.developer.kernel.extended-virtual-addressing</key>
+    <true/>
+
+    <!-- Required to download model weights from Hugging Face on first launch. -->
+    <key>com.apple.security.network.client</key>
+    <true/>
 </dict>
 </plist>

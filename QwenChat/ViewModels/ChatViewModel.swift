@@ -7,184 +7,248 @@ import SwiftUI
 @Observable
 @MainActor
 final class ChatViewModel {
-    var messages: [ChatMessage] = []
-    var selectedModel: AppModel = .qwen3_5_0_8B
-    var isLoading = false
-    var isGenerating = false
-    var loadProgress: Double = 0
-    var loadingStatus: String = ""
-    var errorMessage: String?
+var messages: [ChatMessage] = []
+var selectedModel: AppModel = .qwen3_5_0_8B
+var isLoading = false
+var isGenerating = false
+var loadProgress: Double = 0
+var loadingStatus: String = “”
+var errorMessage: String?
 
-    private(set) var modelContainer: ModelContainer?
-    private var generationTask: Task<Void, Never>?
+```
+// Set to true when the last generation was cut off by maxTokens
+// (not by EOS). The UI can observe this to show a "Continue" button.
+var isTruncated = false
 
-    private static let maxTokens = 1024
-    private static let gpuCacheLimit = 512 * 1024 * 1024 // 512 MB
+private(set) var modelContainer: ModelContainer?
+private var generationTask: Task<Void, Never>?
 
-    // MARK: - Model Loading
+private static let gpuCacheLimit = 512 * 1024 * 1024 // 512 MB
 
-    func loadModel() async {
-        guard !isLoading else { return }
+// MARK: - RAM-tiered token budget
 
-        isLoading = true
-        loadProgress = 0
-        loadingStatus = "Downloading \(selectedModel.displayName)..."
-        errorMessage = nil
+/// Maximum tokens per generation pass, scaled to the device's RAM.
+///
+/// Why per-pass rather than a total cap?
+/// Re-encoding the full conversation history on each continuation round
+/// is expensive, so we keep individual passes short enough to stay within
+/// the GPU memory budget and let the user explicitly request more via a
+/// "Continue" button rather than auto-looping.
+///
+/// Tiers:
+///   < 6 GB  → 1024  (older/lower-end iPhones)
+///   6–7 GB  → 2048  (iPhone 14 / base iPad)
+///   8–11 GB → 4096  (iPhone 15 Pro / mid iPads)
+///   ≥ 12 GB → 8192  (iPad Pro M4/M5)
+static var maxTokensPerPass: Int {
+    let gb = DeviceMemory.bucketGB
+    switch gb {
+    case ..<6:   return 1_024
+    case 6..<8:  return 2_048
+    case 8..<12: return 4_096
+    default:     return 8_192
+    }
+}
 
-        do {
-            // Set GPU cache limit before loading
-            MLX.GPU.set(cacheLimit: Self.gpuCacheLimit)
+// MARK: - Model Loading
 
-            let container = try await loadModelContainer(
-                id: selectedModel.huggingFaceID
-            ) { progress in
-                Task { @MainActor in
-                    self.loadProgress = progress.fractionCompleted
-                    self.loadingStatus = "Downloading \(self.selectedModel.displayName)... \(Int(progress.fractionCompleted * 100))%"
-                }
+func loadModel() async {
+    guard !isLoading else { return }
+
+    isLoading = true
+    loadProgress = 0
+    loadingStatus = "Downloading \(selectedModel.displayName)..."
+    errorMessage = nil
+
+    do {
+        MLX.GPU.set(cacheLimit: Self.gpuCacheLimit)
+
+        let container = try await loadModelContainer(
+            id: selectedModel.huggingFaceID
+        ) { progress in
+            Task { @MainActor in
+                self.loadProgress = progress.fractionCompleted
+                self.loadingStatus = "Downloading \(self.selectedModel.displayName)... \(Int(progress.fractionCompleted * 100))%"
             }
-
-            modelContainer = container
-            loadingStatus = "\(selectedModel.displayName) ready"
-        } catch {
-            errorMessage = "Failed to load model: \(error.localizedDescription)"
-            loadingStatus = "Load failed"
         }
 
-        isLoading = false
+        modelContainer = container
+        loadingStatus = "\(selectedModel.displayName) ready"
+    } catch {
+        errorMessage = "Failed to load model: \(error.localizedDescription)"
+        loadingStatus = "Load failed"
     }
 
-    func switchModel(to newModel: AppModel) async {
-        guard newModel != selectedModel else { return }
+    isLoading = false
+}
 
-        stopGeneration()
+func switchModel(to newModel: AppModel) async {
+    guard newModel != selectedModel else { return }
 
-        // Release current model and flush GPU cache
-        modelContainer = nil
-        MLX.GPU.set(cacheLimit: 0)
-        MLX.GPU.clearCache()
+    stopGeneration()
 
-        selectedModel = newModel
-        messages.removeAll()
+    modelContainer = nil
+    MLX.GPU.set(cacheLimit: 0)
+    MLX.GPU.clearCache()
 
-        await loadModel()
+    selectedModel = newModel
+    messages.removeAll()
+
+    await loadModel()
+}
+
+// MARK: - Background Handling
+
+func handleBackgrounding() {
+    stopGeneration()
+}
+
+func releaseModel() {
+    stopGeneration()
+    modelContainer = nil
+    MLX.GPU.set(cacheLimit: 0)
+    MLX.GPU.clearCache()
+    loadingStatus = "Model released"
+}
+
+// MARK: - Message Sending
+
+func sendMessage(text: String, image: UIImage? = nil) {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty || image != nil else { return }
+    guard !isGenerating else { return }
+
+    isTruncated = false
+
+    let imageData = image?.jpegData(compressionQuality: 0.5)
+    print("[DEBUG] sendMessage: text='\(trimmed)', hasImage=\(image != nil)")
+    let userMessage = ChatMessage(role: .user, content: trimmed, imageData: imageData)
+    messages.append(userMessage)
+
+    generationTask = Task {
+        await generate()
+    }
+}
+
+/// Called from the UI's "Continue" button when the previous response was
+/// cut off at maxTokens. Appends a silent continuation prompt and runs
+/// another generation pass.
+func continueGeneration() {
+    guard isTruncated, !isGenerating else { return }
+
+    isTruncated = false
+
+    // Append a minimal continuation instruction as a user turn.
+    // Keeping it short avoids polluting the visible conversation history;
+    // the ChatBubbleView can choose to hide messages flagged as continuations.
+    let continueMessage = ChatMessage(
+        role: .user,
+        content: "Continue.",
+        imageData: nil,
+        isContinuationPrompt: true  // flag so the UI can hide it if desired
+    )
+    messages.append(continueMessage)
+
+    generationTask = Task {
+        await generate()
+    }
+}
+
+func stopGeneration() {
+    generationTask?.cancel()
+    generationTask = nil
+    isGenerating = false
+}
+
+// MARK: - Generation
+
+private func generate() async {
+    guard let container = modelContainer else {
+        errorMessage = "Model not loaded"
+        return
     }
 
-    // MARK: - Background Handling
+    isGenerating = true
 
-    func handleBackgrounding() {
-        stopGeneration()
-    }
+    var chatMessages: [Chat.Message] = [
+        .system("You are a helpful assistant.")
+    ]
 
-    func releaseModel() {
-        stopGeneration()
-        modelContainer = nil
-        MLX.GPU.set(cacheLimit: 0)
-        MLX.GPU.clearCache()
-        loadingStatus = "Model released"
-    }
-
-    // MARK: - Message Sending
-
-    func sendMessage(text: String, image: UIImage? = nil) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || image != nil else { return }
-        guard !isGenerating else { return }
-
-        // Compress image to reduce memory footprint in chat history
-        let imageData = image?.jpegData(compressionQuality: 0.5)
-        print("[DEBUG] sendMessage: text='\(trimmed)', hasImage=\(image != nil), imageSize=\(image?.size ?? .zero), jpegBytes=\(imageData?.count ?? 0)")
-        let userMessage = ChatMessage(role: .user, content: trimmed, imageData: imageData)
-        messages.append(userMessage)
-
-        generationTask = Task {
-            await generate()
+    for msg in messages {
+        switch msg.role {
+        case .user:
+            if let img = msg.image, let ciImage = CIImage(image: img) {
+                print("[DEBUG] generate: user message with image, extent=\(ciImage.extent)")
+                chatMessages.append(.user(msg.content, images: [.ciImage(ciImage)]))
+            } else {
+                chatMessages.append(.user(msg.content))
+            }
+        case .assistant:
+            chatMessages.append(.assistant(msg.content))
+        case .system:
+            break
         }
     }
 
-    func stopGeneration() {
-        generationTask?.cancel()
-        generationTask = nil
-        isGenerating = false
-    }
+    let assistantMessage = ChatMessage(role: .assistant, content: "", imageData: nil)
+    messages.append(assistantMessage)
+    let assistantIndex = messages.count - 1
 
-    // MARK: - Generation
+    var lastInfo: GenerateInfo?
+    var hitTokenLimit = false
 
-    private func generate() async {
-        guard let container = modelContainer else {
-            errorMessage = "Model not loaded"
-            return
-        }
+    do {
+        let input = UserInput(
+            chat: chatMessages,
+            processing: .init(resize: CGSize(width: 512, height: 512)),
+            additionalContext: ["enable_thinking": false]
+        )
+        print("[DEBUG] generate: \(input.images.count) image(s), maxTokensPerPass=\(Self.maxTokensPerPass)")
 
-        isGenerating = true
+        let params = GenerateParameters(
+            maxTokens: Self.maxTokensPerPass,
+            temperature: 0.7
+        )
+        let lmInput = try await container.prepare(input: input)
+        let stream = try await container.generate(input: lmInput, parameters: params)
 
-        // Build chat messages with images attached to the Chat.Message objects.
-        // The UserInput(chat:) initializer extracts images from messages automatically.
-        var chatMessages: [Chat.Message] = [
-            .system("You are a helpful assistant.")
-        ]
+        for await generation in stream {
+            if Task.isCancelled { break }
 
-        for msg in messages {
-            switch msg.role {
-            case .user:
-                if let img = msg.image, let ciImage = CIImage(image: img) {
-                    print("[DEBUG] generate: user message with image, CIImage extent=\(ciImage.extent)")
-                    chatMessages.append(.user(msg.content, images: [.ciImage(ciImage)]))
-                } else {
-                    chatMessages.append(.user(msg.content))
-                }
-            case .assistant:
-                chatMessages.append(.assistant(msg.content))
-            case .system:
+            switch generation {
+            case .chunk(let text):
+                messages[assistantIndex].content += text
+
+            case .info(let info):
+                lastInfo = info
+                // Detect whether generation stopped due to the token cap
+                // rather than the model naturally finishing (EOS token).
+                // GenerateInfo.stopReason is a String in mlx-swift-lm;
+                // the value is "max_tokens" when the budget is exhausted.
+                hitTokenLimit = (info.stopReason == "max_tokens")
+
+            default:
                 break
             }
         }
 
-        // Add empty assistant message for streaming
-        let assistantMessage = ChatMessage(role: .assistant, content: "", imageData: nil)
-        messages.append(assistantMessage)
-        let assistantIndex = messages.count - 1
-
-        var lastInfoSummary: String?
-
-        do {
-            // Use init(chat:) which extracts images from Chat.Message objects
-            let input = UserInput(
-                chat: chatMessages,
-                processing: .init(resize: CGSize(width: 512, height: 512)),
-                additionalContext: ["enable_thinking": false]
-            )
-            print("[DEBUG] generate: UserInput created with \(input.images.count) images")
-
-            let params = GenerateParameters(maxTokens: Self.maxTokens, temperature: 0.7)
-            let lmInput = try await container.prepare(input: input)
-            print("[DEBUG] generate: LMInput prepared, hasImage=\(lmInput.image != nil), hasVideo=\(lmInput.video != nil), tokenCount=\(lmInput.text.tokens.shape)")
-            let stream = try await container.generate(input: lmInput, parameters: params)
-
-            for await generation in stream {
-                if Task.isCancelled { break }
-
-                switch generation {
-                case .chunk(let text):
-                    messages[assistantIndex].content += text
-                case .info(let info):
-                    // Store only the last info summary (replace any previous one)
-                    lastInfoSummary = String(format: "%.1f tok/s", info.tokensPerSecond)
-                default:
-                    break
-                }
-            }
-
-            // Append performance stats once after generation completes
-            if let summary = lastInfoSummary {
-                messages[assistantIndex].content += "\n\n_(\(summary))_"
-            }
-        } catch {
-            if !Task.isCancelled {
-                messages[assistantIndex].content = "Error: \(error.localizedDescription)"
-            }
+        // Append performance stats once generation is done
+        if let info = lastInfo {
+            let stats = String(format: "%.1f tok/s · %d tokens", info.tokensPerSecond, info.promptTokens + info.generationTokens)
+            messages[assistantIndex].content += "\n\n_(\(stats))_"
         }
 
-        isGenerating = false
+        // Signal to the UI that more content may be available
+        isTruncated = hitTokenLimit && !Task.isCancelled
+
+    } catch {
+        if !Task.isCancelled {
+            messages[assistantIndex].content = "Error: \(error.localizedDescription)"
+        }
     }
+
+    isGenerating = false
+}
+```
+
 }

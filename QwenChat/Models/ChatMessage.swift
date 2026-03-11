@@ -1,12 +1,33 @@
 import Foundation
-import SwiftUI
+import UIKit
 
 struct ChatMessage: Identifiable {
-    let id = UUID()
+    let id: UUID
     let role: Role
     var content: String
     let imageData: Data?
-    let timestamp = Date()
+    let timestamp: Date
+
+    /// True for the silent "Continue." turns that are injected between
+    /// multi-pass responses. The UI can hide these from the chat transcript
+    /// so the conversation looks seamless to the user.
+    var isContinuationPrompt: Bool
+
+    init(
+        id: UUID = UUID(),
+        role: Role,
+        content: String,
+        imageData: Data? = nil,
+        timestamp: Date = Date(),
+        isContinuationPrompt: Bool = false
+    ) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.imageData = imageData
+        self.timestamp = timestamp
+        self.isContinuationPrompt = isContinuationPrompt
+    }
 
     enum Role {
         case user
